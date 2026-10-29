@@ -13,16 +13,18 @@
   canvas#game{image-rendering:pixelated;image-rendering:crisp-edges;background:#05061a;display:block}
   #touch{position:fixed;inset:0;display:none;pointer-events:none}
   #touch.on{display:block}
-  body.touch #wrap{justify-content:flex-start;padding-left:env(safe-area-inset-left)}
   .tbtn{position:absolute;pointer-events:auto;border-radius:50%;display:flex;align-items:center;justify-content:center;
         font:bold 15px "Courier New",monospace;color:#fff;letter-spacing:1px;text-shadow:0 0 4px #000;
-        border:3px solid rgba(255,255,255,.55);box-sizing:border-box;opacity:.78}
-  .tbtn.down{opacity:1;transform:scale(.94)}
-  #bFire{width:100px;height:100px;right:calc(20px + env(safe-area-inset-right));bottom:20px;background:rgba(255,46,136,.45)}
-  #bForce{width:74px;height:74px;right:calc(33px + env(safe-area-inset-right));bottom:132px;background:rgba(255,138,31,.45)}
+        border:3px solid rgba(255,255,255,.45);box-sizing:border-box;opacity:.5}
+  .tbtn.down{opacity:.85;transform:scale(.94)}
+  #bFire{width:96px;height:96px;right:calc(18px + env(safe-area-inset-right));bottom:44px;background:rgba(255,46,136,.45)}
+  #bForce{width:70px;height:70px;right:calc(126px + env(safe-area-inset-right));bottom:70px;background:rgba(255,138,31,.45)}
   .small{width:44px!important;height:44px!important;font-size:12px!important;background:rgba(31,42,107,.6)}
-  #bPause{right:calc(14px + env(safe-area-inset-right));top:10px}
-  #bMute{right:calc(66px + env(safe-area-inset-right));top:10px}
+  #bPause{left:calc(50% + 120px);top:6px}
+  #bMute{left:calc(50% + 170px);top:6px}
+  #bFs{left:calc(50% + 220px);top:6px}
+  #fsDesk{position:fixed;right:10px;bottom:46px;font:bold 12px 'Courier New',monospace;color:#b388ff;background:rgba(5,6,26,.5);border:1px solid #6a3dbf;padding:4px 8px;cursor:pointer;opacity:.6;z-index:4}
+  body.touch #fsDesk{display:none}
   #stickBase{position:absolute;width:120px;height:120px;margin:-60px 0 0 -60px;border-radius:50%;border:3px solid rgba(179,136,255,.5);background:rgba(31,42,107,.25);display:none}
   #stickKnob{position:absolute;width:54px;height:54px;margin:-27px 0 0 -27px;border-radius:50%;background:rgba(179,136,255,.6);border:2px solid #fff;display:none}
   #rotate{position:fixed;left:0;right:0;top:0;padding:10px;text-align:center;font:bold 14px "Courier New",monospace;color:#ffd23f;background:rgba(5,6,26,.85);display:none;z-index:5}
@@ -36,7 +38,9 @@
   <div class="tbtn" id="bForce">FORCE</div>
   <div class="tbtn small" id="bPause">II</div>
   <div class="tbtn small" id="bMute">SND</div>
+  <div class="tbtn small" id="bFs">[ ]</div>
 </div>
+<div id="fsDesk" title="Fullscreen (F)">&#x26F6; FULLSCREEN</div>
 <div id="rotate">&#8635; Rotate your phone to landscape for the best view</div>
 <script>
 /* =====================================================================
@@ -56,8 +60,8 @@
 'use strict';
 
 /* ===================== 0. CONFIG & UTILITIES ===================== */
-const W = 960, H = 540, DT = 1 / 60;
-const ZONE_X = W * 0.40;                 // player may roam the left 40%
+let W = 960; const H = 540, DT = 1 / 60;
+let ZONE_X = W * 0.40;                 // player may roam the left 40%
 const cv = document.getElementById('game');
 const ctx = cv.getContext('2d');
 ctx.imageSmoothingEnabled = false;
@@ -135,6 +139,17 @@ btn('bFire', () => { if (!Input.fire) Input.startPressed = true; Input.fire = tr
 btn('bForce', () => { Input.forcePressed = true; });
 btn('bPause', () => { Input.pausePressed = true; });
 btn('bMute', () => { Audio.toggle(); });
+// ---- optional fullscreen: button, F key, and first tap on mobile ----
+function toggleFs() { const d = document, el = d.documentElement;
+  try { if (d.fullscreenElement || d.webkitFullscreenElement) (d.exitFullscreen || d.webkitExitFullscreen).call(d);
+    else { const r = el.requestFullscreen || el.webkitRequestFullscreen; if (r) { const p = r.call(el, { navigationUI: 'hide' }); if (p && p.catch) p.catch(() => {});
+      if (screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(() => {}); } } } catch (e) {} }
+let fsTried = false;
+document.addEventListener('touchend', () => { if (!fsTried) { fsTried = true; if (!(document.fullscreenElement || document.webkitFullscreenElement)) toggleFs(); } });
+btn('bFs', () => { fsTried = true; toggleFs(); });
+document.getElementById('fsDesk').addEventListener('click', toggleFs);
+addEventListener('keydown', e => { if (e.code === 'KeyF') toggleFs(); });
+document.addEventListener('fullscreenchange', resize);
 document.addEventListener('touchstart', e => {
   enableTouch(); Audio.init();
   for (const t of e.changedTouches) {
@@ -162,12 +177,19 @@ document.addEventListener('touchend', stickEnd); document.addEventListener('touc
 cv.addEventListener('mousedown', () => { Audio.init(); if (G.mode !== 'play') Input.startPressed = true; });
 
 // ---- responsive letterbox ----
+// Adaptive logical view: height fixed at 540, width follows the window aspect (960..1200).
+let SC = 1;
 function resize() {
-  const s = Math.min(innerWidth / W, innerHeight / H);
-  cv.style.width = Math.floor(W * s) + 'px'; cv.style.height = Math.floor(H * s) + 'px';
+  const vw = innerWidth, vh = innerHeight;
+  W = Math.round(clamp(H * vw / vh, 960, 1200)); ZONE_X = W * 0.40; try { HUD_BAR = null; } catch (e) {}
+  const s = Math.min(vw / W, vh / H), cw = Math.ceil(W * s), ch = Math.ceil(H * s);
+  cv.style.width = cw + 'px'; cv.style.height = ch + 'px';
+  const dpr = Math.min(devicePixelRatio || 1, 2), bs = Math.min(cw * dpr, 2400) / W;   // crisp, but capped for phone fps
+  SC = Math.max(1, bs); cv.width = Math.round(W * SC); cv.height = Math.round(H * SC); ctx.imageSmoothingEnabled = false;
   document.getElementById('rotate').style.display = innerHeight > innerWidth * 1.1 ? 'block' : 'none';
 }
-addEventListener('resize', resize); resize();
+addEventListener('resize', resize); addEventListener('orientationchange', () => setTimeout(resize, 200));
+if (window.visualViewport) visualViewport.addEventListener('resize', resize); resize();
 
 /* ===================== 3. SPRITES / PALETTE ===================== */
 // Pixel maps: each char is a palette colour, '.' is transparent.
@@ -342,7 +364,7 @@ const BG = {
     const org = th === this.themes[1], tt = G.frame / 60;
     if (th.planet) ctx.drawImage(th.planet, (W - 260 - (this.t * 0.02) % 1400) | 0, 40);                     // far: planet
     else { drawGlow(W * 0.7, H / 2, '#ff2e88', 260, 0.18 + Math.sin(tt * 1.5) * 0.06); drawGlow(W * 0.2, H * 0.3, '#ff8a1f', 180, 0.1); } // far: fleshy glow
-    const nx = -(this.t * 0.08) % W; ctx.drawImage(th.neb, nx, 0); ctx.drawImage(th.neb, nx + W, 0);           // far: nebula
+    const nw = th.neb.width, nx = -(this.t * 0.08) % nw; for (let o = nx; o < W; o += nw) ctx.drawImage(th.neb, o, 0);           // far: nebula
     for (const s of this.stars) { if (org && s.z < 0.4) continue;                                                // far: twinkling stars
       ctx.globalAlpha = 0.55 + 0.45 * Math.sin(tt * s.tw + s.ph); ctx.fillStyle = s.z > 0.45 ? PAL.white : s.z > 0.3 ? PAL.lav : '#5a5f9a';
       const sz = s.z > 0.45 ? 2 : 1; ctx.fillRect(s.x | 0, s.y | 0, sz * (1 + (G.speedMul > 1.5 ? 4 : 0)), sz);
@@ -743,7 +765,7 @@ function bossBase(name, hp, score) {
 function makeWarden(hpMul = 1) {
   const b = bossBase('WARDEN', 300 * hpMul, 3000);
   b.update = function () { this.t += DT; this.flash -= DT;
-    this.x += ((this.t < 2.5 ? 760 : 740 + Math.sin(this.t * 0.7) * 40) - this.x) * DT * 2; this.y = H / 2 + Math.sin(this.t * 0.9) * 150;
+    this.x += ((this.t < 2.5 ? 760 + W - 960 : 740 + W - 960 + Math.sin(this.t * 0.7) * 40) - this.x) * DT * 2; this.y = H / 2 + Math.sin(this.t * 0.9) * 150;
     this.cd -= DT; if (this.cd <= 0 && this.t > 2) { this.cd = (this.phase() === 1 ? 1.2 : 0.8) / G.diff;
       const a = aim(this.x - 40, this.y); for (let i = -2; i <= 2; i++) ebullet(this.x - 40, this.y, a + i * 0.18, 240);
       if (this.phase() > 1) for (const oy of [-46, 46]) ebullet(this.x - 20, this.y + oy, Math.PI, 300, 4, 1); } };
@@ -766,7 +788,7 @@ function makeWarden(hpMul = 1) {
 function makeDreadcore() {
   const b = bossBase('DREADCORE', 1200, 20000); b.ang = 0;
   b.update = function () { this.t += DT; this.flash -= DT; const ph = this.phase();
-    const tx = ph === 3 ? 720 + Math.sin(this.t * 1.3) * 90 : 760; this.x += ((this.t < 3 ? 780 : tx) - this.x) * DT * 1.5;
+    const tx = ph === 3 ? 720 + W - 960 + Math.sin(this.t * 1.3) * 90 : 760 + W - 960; this.x += ((this.t < 3 ? 780 + W - 960 : tx) - this.x) * DT * 1.5;
     this.y = H / 2 + Math.sin(this.t * (ph === 3 ? 1.1 : 0.6)) * (ph === 1 ? 90 : 140);
     if (this.t < 3) return; this.cd -= DT;
     if (ph === 1 && this.cd <= 0) { this.cd = 1.1 / G.diff; const a = aim(this.x, this.y);       // aimed triple bursts + pod lasers
@@ -803,7 +825,7 @@ function makeHiveMother() {
   const b = bossBase('HIVE MOTHER', 1300, 35000); b.tents = [];
   for (let k = 0; k < 3; k++) { const seg = []; for (let i = 0; i < 12; i++) seg.push({ x: 0, y: 0 }); b.tents.push(seg); }
   b.update = function () { this.t += DT; this.flash -= DT; const ph = this.phase();
-    this.x += ((this.t < 3 ? 790 : 770 + Math.sin(this.t * 0.5) * 30) - this.x) * DT * 1.2; this.y = H / 2 + Math.sin(this.t * 0.45) * 70;
+    this.x += ((this.t < 3 ? 790 + W - 960 : 770 + W - 960 + Math.sin(this.t * 0.5) * 30) - this.x) * DT * 1.2; this.y = H / 2 + Math.sin(this.t * 0.45) * 70;
     const reach = ph === 1 ? 14 : ph === 2 ? 19 : 22;
     this.tents.forEach((seg, k) => { const base = -0.9 + k * 0.9;
       seg.forEach((s, i) => { const a = Math.PI + base * 1.1 + Math.sin(this.t * (1.3 + k * 0.3) + i * 0.35) * (0.2 + i * 0.025);
@@ -1012,7 +1034,7 @@ function drawTitle() {
 }
 function render() {
   const th = BG.themes[STAGES[G.stage].theme];
-  ctx.save(); if (G.shake > 0) ctx.translate((vr() - .5) * G.shake | 0, (vr() - .5) * G.shake | 0);
+  ctx.setTransform(SC, 0, 0, SC, 0, 0); ctx.save(); if (G.shake > 0) ctx.translate((vr() - .5) * G.shake | 0, (vr() - .5) * G.shake | 0);
   BG.drawBack(th);
   if (G.mode !== 'title') { drawOrbs(); drawEnemies(); for (const b of bosses) b.draw(); drawProjectiles(); drawPlayer(); if (P.alive || F.state === 'free') drawForce(); }
   drawParts(); BG.drawFore(th); ctx.restore();
